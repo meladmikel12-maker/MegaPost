@@ -1,0 +1,17 @@
+[functions.sign-request]
+verify_jwt = false
+
+[functions.update-products]
+verify_jwt = false
+
+[functions.clean-products]
+verify_jwt = false
+
+[functions.generate-banner]
+verify_jwt = false
+
+[functions.shorten-link]
+verify_jwt = false
+
+[functions.generate-amazon-screenshot]
+verify_jwt = false

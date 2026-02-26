@@ -1,0 +1,80 @@
+name: Deploy User Backend
+
+on:
+  repository_dispatch:
+    types: [setup_user]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Prepare Files and Folders
+        run: |
+          cd mega-post-backend
+          mkdir -p supabase
+          
+          [ -f config ] && mv config supabase/config.toml
+          [ -f config.toml ] && mv config.toml supabase/config.toml
+          [ -d migrations ] && mv migrations supabase/
+          [ -d functions ] && mv functions supabase/
+          
+          if ls supabase/migrations/*.sql 1> /dev/null 2>&1; then
+            CLEAN_URL=$(echo "${{ github.event.client_payload.supabase_url }}" | sed 's|https://||g')
+            sed -i "s|{{PROJECT_URL}}|$CLEAN_URL|g" supabase/migrations/*.sql
+            sed -i "s|{{ANON_KEY}}|${{ github.event.client_payload.anon_key }}|g" supabase/migrations/*.sql
+          fi
+          
+          for func in sign-request update-products clean-products generate-banner shorten-link generate-amazon-screenshot; do
+            if [ -f "supabase/functions/$func/$func.ts" ]; then
+              mv "supabase/functions/$func/$func.ts" "supabase/functions/$func/index.ts"
+              echo "Fixed structure for $func"
+            fi
+          done
+
+      - name: Link and Push Database
+        run: |
+          cd mega-post-backend
+          rm -rf supabase/.temp
+          
+          npx supabase@latest link \
+            --project-ref "${{ github.event.client_payload.project_id }}" \
+            --password '${{ github.event.client_payload.db_password }}' \
+            --yes
+          
+          npx supabase@latest db push --password '${{ github.event.client_payload.db_password }}' --include-all --yes
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ github.event.client_payload.user_access_token }}
+
+      - name: Set Project Secrets
+        run: |
+          cd mega-post-backend
+          npx supabase@latest secrets set \
+            --project-ref "${{ github.event.client_payload.project_id }}" \
+            AMAZON_CREDENTIAL_ID="${{ github.event.client_payload.amazon_credential_id }}" \
+            AMAZON_CREDENTIAL_SECRET="${{ github.event.client_payload.amazon_credential_secret }}" \
+            APP_SUPABASE_URL="${{ github.event.client_payload.supabase_url }}" \
+            APP_SUPABASE_SERVICE_ROLE_KEY="${{ github.event.client_payload.service_role_key }}"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ github.event.client_payload.user_access_token }}
+
+      - name: Deploy Functions
+        run: |
+          cd mega-post-backend
+          for func in sign-request update-products clean-products generate-banner shorten-link generate-amazon-screenshot; do
+            if [ -d "supabase/functions/$func" ]; then
+              npx supabase@latest functions deploy $func \
+                --project-ref "${{ github.event.client_payload.project_id }}" \
+                --no-verify-jwt
+            fi
+          done
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ github.event.client_payload.user_access_token }}
